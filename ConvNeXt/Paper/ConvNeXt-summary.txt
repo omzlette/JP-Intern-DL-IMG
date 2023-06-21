@@ -1,0 +1,266 @@
+ConvNeXt
+
+ABSTRACT + INTRODUCTION:
+
+- Achieves 87.8% accuracy on ImageNet, outperforming Swin Transformers on COCO 
+
+Starting from ConvNet (CNN), at the same time NLP started taking a complete different path and took Transformers as its main architecture instead of RNN. Later in 2020, Transformers were later used in image-related tasks.
+
+Because of the introduction of Hierarchical Transformers, the sliding window strategy was reintroduced to Transformers. This allows them to behave more similarly to ConvNets.
+
+Swin Transformer demonstrated that Transformers can be adopted as a generic vision backbone and achieve state-of-the-art performance across various computer vision tasks other than image classification. Its success and rapid adoption reveals that the essence of convolution did not disappear, rather it became much more desired.
+
+Advancements of Transformers for computer vision have been aiming to bring back convolutions. However, these attempts came at a cost, such as a naive implementation of sliding window self-attention can be expensive.
+
+The reason CNN seems to be fading away is because Transformers surpass CNN in many vision tasks, despite the fact that CNN already satisfies properties that Transformers desires.
+
+
+INTENTION: To close the gap between pre-Vision Transformers (ViT) and post-ViT eras for ConvNets and to test the limits of what a pure ConvNet can achieve
+
+KEY LEAD QUESTION: How do design decisions in Transformers impact ConvNets' performance?
+	
+	DISCOVERY: Using the Transformers' and ResNeXt's design decision helped improved ConvNet's accuracy by a lot
+
+PROPOSE: ConvNeXt (A family of pure ConvNets)
+
+EVALUATED ON: ImageNet Classification, Object Detection/Segmentation on COCO, Semantic Segmentation on ADE20K
+
+AIM: Hope that new observations and discussions can challenge some common beliefs and encourage people to rethink how important CNN is to computer vision
+
+ROADMAP:
+	BASELINE:
+		**Techniques = procedure (according to the paper)
+	- ResNet-50, trained using similar training techniques used to train vision transformer
+		- CLAIM: Better results than original ResNet-50 (76.1% -> 78.8%)
+		: What is the training techniques used to train vision transformer?
+			- AdamW optimizer was used as an example in the paper
+			- Extended from 90 (original) to 300 epochs
+			- Data Augmentation Techniques
+				- Mixup
+				- Cutmix
+				- RandAugment
+				- Random Erasing
+			- Regularization Schemes
+				- Stochastic Depth
+				- Label Smoothing
+		- The paper attached a set of hyperparameters in Appendix A.1
+
+		From the result, it implys that the training procedure may have a significant effect on the result difference between traditional ResNet-50 and vision transformer.
+
+		This training technique will be used throughout the modernization process.
+
+		***Result is the average of 3 different seeds using the same training technique.
+
+	Series of Design Decisions:
+	- Macro Design
+	: Analyze Swin Transformers' macro network design
+		:- Swin Transformers follow ConvNet to use a multi-stage design
+			- Each stage has different feature map resolution
+
+	: After analyzing, the paper claims to have found 2 interesting design considerations
+		- Stage compute ratio
+			- CLAIM: Improved model accuracy from 78.8% (from adjusting training techniques) to 79.4%
+			: Original design = empirical (based on observation/experience)
+			- Detector head operates on 14x14 feature plane
+			 	:- Swin-T followed the same principle
+			 		- Normal Swin-T ratio = 1:1:3:1
+			 		- Larger Swin-T ratio = 1:1:9:1
+			 
+			- Following the design, they adjusted the ratio of each stage
+			 	- Original ResNet-50 = 3:4:6:3
+			 	- New ratio = 3:3:9:3
+			 		- This aligns the FLOPs (Floating points operation) with Swin-T
+
+			It is said that a more optimal design is likely to exist.
+			
+		- Stem Cell structure
+			- CLAIM: Improved accuracy from 79.4% (Stage compute ratio) to 79.5%
+			: Normally, the stem cell design is concerned with how the images will be processed at the beginning
+			- Common stem cell agressively downsample the input image to an appropriate feature map size in both ConvNets and Vision Transformers
+				- Traditional ResNet's Stem Cell
+					- 7x7 Conv Layers with stride 2
+					- Max Pool
+					which resulted in 4x downsampling of the input images
+				- Vision Transformers' Stem Cell
+					- use Patchify strategy instead of stem cell
+					which corresponds to a large kernel size (e.g. kernel size = 14 or 16)
+					- Non-Overlapping Convolution
+				- Swin Transformers' Stem Cell
+					- Similar Patchify layer
+					but with a smaller batch size of 4 (accommodate the architecture's multi-stage design)
+				- Author's Stem Cell
+					- Replaced ResNet's with Patchify layer
+						- Patchify layer was implemented using 4x4, stride 4 Conv Layers
+
+			From the result, it is suggested that ResNet's stem cell may be replaced with a simpler patchify layer 
+
+	- ResNeXt-ify
+		- CLAIM: Brings the network performance to 80.5% (from 79.5%) with increased FLOPs (5.3G)
+		: Attempt to adopt the idea of ResNeXt (better FLOPs/accuracy trade-off than a vanilla ResNet)
+		: The core component is grouped convolution (convolutional filters are separated into different groups)
+		: ResNeXt's guiding priciple is to "use more groups, expand width"
+			: ResNeXt uses grouped convolution for 3x3 conv layer in a bottleneck block [d3x3]
+
+		- Depthwise Convolution
+			: A special case of grouped convolution where the number of groups equals the number of channels
+			: Similar to weighted sum operation in self-attention (operates on a per-channel basis)
+			- Combination of depthwise convolution and 1x1 convolution leads to a separation of spatial and channel mixing
+				- Property shared by Vision Transformers where each operation either mixes information across spatial or channel dimension but not both
+
+			However, the use of depthwise convolution effectively reduces the network FLOPs and accuracy
+
+		- Increase Network Width
+			- Increased the network width to the same number of channels as Swin-T's
+				- 64 -> 96
+
+	- Inverted Bottleneck
+		- CLAIM: This brings the accuracy up from 80.5% (ResNeXt-ify) to 80.6% [with reduced FLOPs]
+		: Important design in Transformer block = creates an inverted bottleneck
+		- Inverting Dimensions
+			- Transformer design is connected to the inverted bottleneck design with an expansion ratio of 4 used in ConvNets
+			- Originally the design was:
+				1x1, 384 -> 96  >>>  d3x3, 96 -> 96  >>>  1x1, 96 -> 384
+			- Inverted bottleneck block:
+				1x1, 96 -> 384  >>>  d3x3, 384 -> 384 >>> 1x1, 384 -> 96
+			: The inverted bottleneck block reduces FLOPs to 4.6G from 5.3G
+				- Happens due to the significant FLOPs reduction in the downsampling residual blocks' shortcut 1x1 conv layer
+
+	- Large Kernel Size
+		- CLAIM: They continued using 7x7 depthwise conv layer in each block and moved the layer up (Accuracy: 80.6%, FLOPs: 4.1G)
+		: In Vision Transformers, there is non-local self-attention, which enables each layer to have a global receptive field
+		: Originally, large kernel sizes have been used in the past with ConvNets, the standard was to stack small kernel-sized conv layers (efficient hardware implementations on modern GPUs)
+		- Moving up Depthwise convolutional layer
+			- Inverted bottleneck block:
+				1x1, 96 -> 384  >>>  d3x3, 384 -> 384 >>> 1x1, 384 -> 96
+			- Moving up depth conv layer
+				d3x3, 96 -> 96  >>>  1x1, 96 -> 384  >>>  1x1, 384 -> 96
+			: This reduced the FLOPs to 4.1G from 4.6G resulting in an performance degradation to 79.9%
+		- Kernel Size
+			- Experimented with several kernel sizes: 3, 5, 7, 9, 11
+				Performance improvement:
+				- 3x3 -> 7x7 = 79.9% to 80.6% (FLOPs roughly the same)
+
+				No further gain when increasing kernel size beyond 7x7
+
+	- Various Layer-wise micro designs
+		: This was done at a layer level, focusing on specific choices of activation functions and normalization layers
+		- Changing from ReLU to GELU
+			: ReLU was used in the original Transformer paper
+			: GELU, can be thought of as a smoother variant of ReLU, was used in the most advanced Transformers (BERT, GPT-2, ViTs)
+			- ReLU can be subtituted with GELU but the accuracy remains unchanged (80.6%)
+		- Fewer Activations Layers
+			: Common practice = append activation function to each conv layer, including 1x1 conv layer
+			: Eliminate all GELU layers from the residual block except for one between the two 1x1 layers (replicates Transformer)
+			- Improved the accuracy to 81.3%, practically matching Swin-T
+		- Fewer Normalization Layers
+			: Transformers usually have fewer normalization layers
+			- Removing 2 BatchNorm layers leaving only 1 BatchNorm layer before the conv 1x1 layer increased the accuracy to 81.4%, surpassing Swin-T
+
+			NOTE: Right now, ConvNeXt has fewer normalization layers per block than Transformers
+			NOTE2: Adding 1 additional BN layer at the beginning of the block does not improve the performance
+
+		- Substituting BatchNorm (BN) with Layer Normalization (LN)
+			: BN is an essential component in ConvNets as it improves convergence and reduces overfitting
+			: BN has too many details that can reduce the model's performance
+			: Despite this fact and the fact that there have been numerous attempts in developing alternative normalization techniques, BN is still remained as the preferred option in most vision tasks
+
+			: However, Transformers have been using LN, which results in good performance across different application scenarios
+
+			- Changing from BN to LN slightly increased the accuracy to 81.5%
+
+		- Separating Downsampling Layers
+			: In ResNet, the spatial downsampling is achieved by the residual block at the start using 3x3 conv with stride 2 (and 1x1 conv with stride 2 at the shortcut connection)
+			: In Swin Transformers, a separate downsampling layer is added between stages
+
+			: ConvNeXts uses 2x2 conv layer with stride 2 for spatial downsampling
+				- This modification leads to diverged training
+				- Adding normalization layers wherever spatial resolution is changed can help stablize training
+
+			- This improve the accuracy to 82.0%, significantly exceeding Swin-T's 81.3%
+
+	Despite all the design decision dicussed, the exploration was limited to a small scale compared to Vision Transformers' scaling behavior, which is what distinguishes them.
+
+EVALUATIONS ON IMAGENET:
+- Construct different ConvNeXt variants (ConvNeXt-T/S/B/L) similarily to Swin-T/S/B/L
+	- ConvNeXt-T/B is the end product of the modernizing procedure on ResNet-50/200
+	- Built a larger ConvNeXt-XL to further test the scalability of ConvNeXt
+	- Variants only differ in the number of channels and number of blocks
+
+	Settings:
+		Training on ImageNet-1K:
+		- Epochs: 300
+		- Optimizer: AdamW
+			- Learning rate: 4e-3 (0.004)
+		- Batch size: 4096
+		- Weight decay: 0.05
+		- 20-epoch linear warmup
+		- Cosine decaying schedule [AFTERWARD]
+
+		- Data Augmentation
+			- All common techniques (Line 38 in this file)
+
+		- Regularization
+			- All common techniques (Line 43 in this file)
+
+		- Layer Scale
+			- Initial Value: 1e-6 (0.000001)
+
+		- Use Exponential Moving Average (EMA)
+			: Reduce large models' overfitting
+
+		Pre-training on ImageNet-22K
+		- Epochs: 90
+		- Warmup Epochs: 5
+		- No EMA
+
+		- Other settings follow ImageNet-1K
+
+		Fine-Tuning on ImageNet-1K
+		- Fine-Tune ImageNet-22K model
+		- Epochs: 30
+		- Optimizer: AdamW
+			- Learning Rate: 5e-5 (0.00005)
+		- Cosine Learning Rate schedule
+		- No warmup
+		- Batch Size: 512
+		- Weight Decay: 1e-8 (0.00000001)
+
+		- Default pre-training, fine-tuning and testing resolution: 224^2
+			- Fine Tune at larger resolution: 384^2
+				- For both ImageNet-22K and ImageNet-1K pre-trained models
+
+		Compared to ViTs/Swin Transformers, ConvNeXts are easier to fine-tune at different resolutions since the network is fully-convolutional and there is no need to adjust the input patch size or interpolate absolute/relative position biases.
+
+	Results:
+	- See Table 1 in the paper
+
+	We can observe that most of the results are better than existing ViTs'/Swin Transformers' results, which is a great sign.
+
+	Furthermore, from the result, we can observe that ConvNeXt shows promising scaling behavior with higher-capacity models and a larger (pre-training) dataset
+
+Empirical Evaluation on Downstream Tasks:
+	
+	Object detection and segmentation on COCO:
+	- Fine-tune Mask R-CNN and Cascade Mask R-CNN on COCO with ConvNeXt backbones
+		- Use multi-scale training
+		- Optimizer: AdamW
+		- Schedule: 3x
+
+		In many cases, ConvNeXt performs significantly better than Swin Transformers
+
+	Semantic Segmentation on ADE20K
+	- ConvNeXt backbones on ADE20K semantic segmentation task with UperNet
+		- Trained for 160K iterations
+		- Batch Size: 16
+
+		There are also other experimental settings follow Appendix A.3 in the paper
+
+		ConvNeXt models can achieve competitive performance across different model capacities, which further validate the effectiveness of our architecture design.
+
+	Worth noting:
+		Improved efficiency is a result of the ConvNet inductive bias, not directly related to the self-attention mechanism in Vision Transformers.
+
+
+
+
+
