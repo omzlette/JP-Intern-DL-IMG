@@ -144,9 +144,13 @@ def train_model(models:list,
         for param in model.parameters():
             param.requires_grad_()
         
-        with tqdm(total=num_epochs, desc=f'ConvNeXt {modelname} ->',
+        with tqdm(total=num_epochs, desc=f'{modelname} ->',
                   unit='epoch',bar_format=bar_format, disable=not verbose) as pbar:
             for epoch in range(num_epochs):
+                
+                if early_stopping.early_stop:
+                    verboseprint(f"Early stopping at epoch {epoch}")
+                    break
 
                 ### Train the model ###
 
@@ -155,29 +159,33 @@ def train_model(models:list,
                 train_correct = 0
                 train_samples = 0
                 
-                for _, batch in tqdm(enumerate(train_loader), desc=f'Epoch {epoch+1}/{num_epochs}',
-                                     unit='batch', bar_format=bar_format, disable=not verbose):
-                    images = batch[0].to(device)
-                    labels = batch[1].to(device).long()
+                with tqdm(enumerate(train_loader), desc=f'Training -> Epoch {epoch+1}/{num_epochs}',
+                                        unit='batch', bar_format=bar_format + " {postfix}", disable=not verbose, total=len(train_loader)) as pbar2:
+                    for _, batch in pbar2:
+                        images = batch[0].to(device)
+                        labels = batch[1].to(device).long()
 
-                    optimizer.zero_grad()
-                    
-                    outputs = model(images)
+                        optimizer.zero_grad()
+                        
+                        outputs = model(images)
 
-                    # Convert outputs to tensor
-                    if isinstance(outputs, ImageClassifierOutputWithNoAttention):
-                        outputs = outputs.logits
+                        # Convert outputs to tensor
+                        if isinstance(outputs, ImageClassifierOutputWithNoAttention):
+                            outputs = outputs.logits
 
-                    loss = criterion(outputs, labels)
-                    loss.backward()
-                    optimizer.step()
+                        loss = criterion(outputs, labels)
+                        loss.backward()
+                        optimizer.step()
 
-                    running_loss += loss.item() * images.size(0)
+                        running_loss += loss.item() * images.size(0)
 
-                    # Training Accuracy
-                    _, predicted = torch.max(outputs, dim=1)
-                    train_correct += (predicted == labels).sum().item()
-                    train_samples += labels.size(0)
+                        # Training Accuracy
+                        _, predicted = torch.max(outputs, dim=1)
+                        train_correct += (predicted == labels).sum().item()
+                        train_samples += labels.size(0)
+
+                        # Update progress bar
+                        pbar2.set_postfix_str(f"Train Loss: {running_loss/len(train_loader.dataset):.4f}, Train Acc: {train_correct/train_samples:.4f}")
 
                 train_epoch_loss = running_loss/len(train_loader.dataset)
                 train_epoch_acc = train_correct/train_samples
@@ -193,27 +201,31 @@ def train_model(models:list,
                     test_correct = 0
                     test_total = 0
                     
-                    for _, batch in tqdm(enumerate(test_loader), desc=f'Epoch {epoch+1}/{num_epochs}',
-                                         unit='batch', bar_format=bar_format, disable=not verbose):
-                        images = batch[0].to(device)
-                        labels = batch[1].to(device).long()
+                    with tqdm(enumerate(test_loader), desc=f'Testing -> Epoch {epoch+1}/{num_epochs}',
+                                         unit='batch', bar_format=bar_format+" {postfix}", disable=not verbose, total=len(test_loader)) as pbar2:
+                        for _, batch in pbar2:
+                            images = batch[0].to(device)
+                            labels = batch[1].to(device).long()
 
-                        outputs = model(images)
+                            outputs = model(images)
 
-                        if isinstance(outputs, ImageClassifierOutputWithNoAttention):
-                            outputs = outputs.logits
+                            if isinstance(outputs, ImageClassifierOutputWithNoAttention):
+                                outputs = outputs.logits
 
-                        # Test Loss
-                        loss = criterion(outputs, labels)
-                        total_loss += loss.item() * images.size(0)
+                            # Test Loss
+                            loss = criterion(outputs, labels)
+                            total_loss += loss.item() * images.size(0)
 
-                        # Test Accuracy
-                        _, predicted = torch.max(outputs, dim=1)
-                        test_total += labels.size(0)
-                        test_correct += (predicted == labels).sum().item()
-                    
-                    test_epoch_loss = total_loss/len(test_loader.dataset)
-                    test_epoch_acc = test_correct/test_total
+                            # Test Accuracy
+                            _, predicted = torch.max(outputs, dim=1)
+                            test_total += labels.size(0)
+                            test_correct += (predicted == labels).sum().item()
+
+                            # Update progress bar
+                            pbar2.set_postfix_str(f"Test Loss: {total_loss/len(test_loader.dataset):.4f}, Test Acc: {test_correct/test_total:.4f}")
+                        
+                        test_epoch_loss = total_loss/len(test_loader.dataset)
+                        test_epoch_acc = test_correct/test_total
 
                 # Save the loss and accuracy for train and test set
                 train_loss.append(train_epoch_loss)
@@ -221,16 +233,14 @@ def train_model(models:list,
                 test_loss.append(test_epoch_loss)
                 test_acc.append(test_epoch_acc)
 
-                verboseprint(f'''ConvNeXt {modelname} -> Epoch: {epoch+1}/{num_epochs} 
-                Train Loss: {train_epoch_loss} | Train Accuracy: {train_epoch_acc} 
-                Test Loss: {test_epoch_loss} | Test Accuracy: {test_epoch_acc}''')
+                # verboseprint(f'''{modelname} -> Epoch: {epoch+1}/{num_epochs} 
+                # Train Loss: {train_epoch_loss} | Train Accuracy: {train_epoch_acc} 
+                # Test Loss: {test_epoch_loss} | Test Accuracy: {test_epoch_acc}''')
 
                 # Early Stopping
                 early_stopping(test_epoch_loss, model)
 
-                if early_stopping.early_stop:
-                    verboseprint(f"Early stopping at epoch {epoch+1}")
-                    break
+
                 
                 pbar.update()
 
@@ -279,7 +289,8 @@ def lossAccPlot(lossAccDict:dict,
 #####################################################
 
 def printTestAcc(testAccDict:dict,
-                 modelnames:list):
+                 modelnames:list,
+                 **kwargs):
     """
     Print the last and max test accuracy of the model(s).
 
@@ -287,10 +298,12 @@ def printTestAcc(testAccDict:dict,
         testAccDict (dict): Dictionary containing the test accuracy of the model(s).
         modelnames (list): List of model names.
     """
+    if kwargs is not None:
+        add_name = kwargs['add_name']
     # Get last and max test accuracy
     for modelname in modelnames:
         epochNum = testAccDict[f"Test Accuracy_{modelname}"].index(max(testAccDict[f"Test Accuracy_{modelname}"]))
-        print(f'''ConvNeXt {modelname} -> Last Test Accuracy: {testAccDict[f"Test Accuracy_{modelname}"][-1]} 
+        print(f'''{modelname}_{add_name} -> Last Test Accuracy: {testAccDict[f"Test Accuracy_{modelname}"][-1]} 
                 Max Test Accuracy: {max(testAccDict[f"Test Accuracy_{modelname}"])} (Epoch:{epochNum})''')
 
 #####################################################
@@ -314,14 +327,14 @@ def save_model(models:list,
         os.makedirs(path)
 
     for model, modelname in zip(models, modelnames):
-        torch.save(model.state_dict(), f'{path}/ConvNeXt_{modelname}.pt')
+        torch.save(model.state_dict(), f'{path}/{modelname}.pt')
         # Save the loss and accuracy for train and test set
         temp = dict()
         temp[f'Training Loss_{modelname}'] = epochDict[f'Training Loss_{modelname}']
         temp[f'Training Accuracy_{modelname}'] = epochDict[f'Training Accuracy_{modelname}']
         temp[f'Test Loss_{modelname}'] = epochDict[f'Test Loss_{modelname}']
         temp[f'Test Accuracy_{modelname}'] = epochDict[f'Test Accuracy_{modelname}']
-        with open(f'{path}/ConvNeXt_{modelname}_EpochDict.json', 'w') as fp:
+        with open(f'{path}/{modelname}_EpochDict.json', 'w') as fp:
             json.dump(temp, fp)
 
 #####################################################
