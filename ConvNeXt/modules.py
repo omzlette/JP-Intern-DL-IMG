@@ -98,7 +98,8 @@ def train_model(models:list,
                 device:torch.device, 
                 patience:int=3, 
                 path_to_folder:str='models/earlystop', 
-                verbose:bool=True) -> dict:
+                verbose:bool=True,
+                swin=None) -> dict:
 
     """
     This function trains and tests the model(s) and returns the training and testing loss and accuracy of the model(s).
@@ -167,11 +168,15 @@ def train_model(models:list,
 
                         optimizer.zero_grad()
                         
-                        outputs = model(images)
+                        if swin is None:
+                            outputs = model(images).logits
+                        else:
+                            inputs = swin(images)
+                            outputs = model(**inputs).logits
 
-                        # Convert outputs to tensor
-                        if isinstance(outputs, ImageClassifierOutputWithNoAttention):
-                            outputs = outputs.logits
+                        # # Convert outputs to tensor
+                        # if isinstance(outputs, ImageClassifierOutputWithNoAttention):
+                        #     outputs = outputs.logits
 
                         loss = criterion(outputs, labels)
                         loss.backward()
@@ -206,11 +211,15 @@ def train_model(models:list,
                         for _, batch in pbar2:
                             images = batch[0].to(device)
                             labels = batch[1].to(device).long()
+                            
+                            if swin is None:
+                                outputs = model(images).logits
+                            else:
+                                inputs = swin(images)
+                                outputs = model(**inputs).logits
 
-                            outputs = model(images)
-
-                            if isinstance(outputs, ImageClassifierOutputWithNoAttention):
-                                outputs = outputs.logits
+                            # if isinstance(outputs, ImageClassifierOutputWithNoAttention):
+                            #     outputs = outputs.logits
 
                             # Test Loss
                             loss = criterion(outputs, labels)
