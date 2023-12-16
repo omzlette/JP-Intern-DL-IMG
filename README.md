@@ -2,7 +2,7 @@
 
 <hr>
 
-Written by: Tharnarch Thoranisttakul (Omz) [タナット トラニスタクン]（オム） 
+Written by: Tharnarch Thoranisttakul (Omz) [タナット トラニスタクン]（オム）  
 This repository is for all codes and documents I made during internship period at Kanazawa University.
 
 I was tasked to fine-tune <b>ConvNeXt</b> (an improvement over traditional CNN using Transformers building and training methods) to make it compatible with image classification task.  
